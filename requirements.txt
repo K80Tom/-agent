@@ -1,0 +1,7 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0.0
+alibabacloud_tea_openapi
+alibabacloud_docmind_api20220711
+alibabacloud_credentials
+alibabacloud_tea_util
