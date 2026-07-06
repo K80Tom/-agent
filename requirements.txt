@@ -6,3 +6,5 @@ psycopg[binary]>=3.2.0
 httpx>=0.27.0
 openpyxl>=3.1.0
 tos>=2.7.0
+pymilvus>=2.4.0
+python-multipart>=0.0.9
