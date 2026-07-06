@@ -34,7 +34,7 @@ const nodes = {
 };
 
 function apiBaseUrl() {
-  return nodes.apiBaseInput.value.replace(/\/$/, "") || "http://127.0.0.1:8000";
+  return nodes.apiBaseInput.value.trim().replace(/\/$/, "") || window.location.origin;
 }
 
 function setView(view) {
@@ -315,3 +315,7 @@ nodes.dropZone.addEventListener("drop", (event) => {
 
 nodes.ingestForm.addEventListener("submit", uploadExcel);
 nodes.searchForm.addEventListener("submit", searchAssets);
+
+if (nodes.apiBaseInput.value === "http://127.0.0.1:8000") {
+  nodes.apiBaseInput.value = window.location.origin;
+}
