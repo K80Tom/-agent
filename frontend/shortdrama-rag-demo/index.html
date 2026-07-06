@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f7f8fb" />
+    <title>Shortdrama</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <div class="appShell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brandMark" aria-hidden="true">S</div>
+          <div>
+            <strong>Shortdrama</strong>
+            <span>素材智能体</span>
+          </div>
+        </div>
+
+        <nav class="sideNav" aria-label="主导航">
+          <button class="active" type="button" data-view-button="ingest">
+            <span class="navIcon" aria-hidden="true">+</span>
+            素材入库
+          </button>
+          <button type="button" data-view-button="search">
+            <span class="navIcon" aria-hidden="true">?</span>
+            语义检索
+          </button>
+        </nav>
+
+        <div class="sideInfo">
+          <div>
+            <span class="navIcon small" aria-hidden="true">API</span>
+            <span>后端地址</span>
+          </div>
+          <input id="apiBaseInput" value="http://127.0.0.1:8000" aria-label="API 后端地址" />
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <span class="pageKicker" id="pageKicker">Excel Asset Ingest</span>
+            <h1 id="pageTitle">智能入库</h1>
+          </div>
+          <div class="topActions">
+            <span class="statusPill">
+              <span class="navIcon small" aria-hidden="true">DB</span>
+              后端已配置
+            </span>
+          </div>
+        </header>
+
+        <section class="stage viewPanel" id="ingestView">
+          <form class="uploadPanel" id="ingestForm">
+            <div class="panelHead">
+              <div>
+                <span class="sectionIcon" aria-hidden="true">入</span>
+                <h2>上传 Excel 并自动入库</h2>
+              </div>
+              <div class="inlineStatus idle" id="ingestStatus">等待操作</div>
+            </div>
+
+            <label class="dropZone" id="dropZone">
+              <input id="excelInput" type="file" accept=".xlsx,.xlsm" />
+              <span class="fileGlyph" aria-hidden="true">XLS</span>
+              <strong id="fileTitle">选择或拖入短剧资产表</strong>
+              <span id="fileHint">支持 .xlsx / .xlsm</span>
+            </label>
+
+            <div class="formGrid">
+              <label>
+                <span>项目名</span>
+                <input id="projectNameInput" placeholder="不填则从文件名自动提取" />
+              </label>
+              <label>
+                <span>批次大小</span>
+                <input id="batchSizeInput" type="number" min="1" max="20" value="5" />
+              </label>
+            </div>
+
+            <button class="primaryButton" id="ingestButton" type="submit">开始入库</button>
+          </form>
+
+          <section class="emptyPanel" id="ingestEmpty">
+            <span class="emptyIcon" aria-hidden="true">AI</span>
+            <h2>等待第一份资产表</h2>
+            <p>上传后会展示入库数量、保存路径和前几条资产预览。</p>
+          </section>
+
+          <section class="resultPanel hidden" id="ingestResultPanel">
+            <div class="panelHead">
+              <div>
+                <span class="sectionIcon success" aria-hidden="true">✓</span>
+                <h2>入库结果</h2>
+              </div>
+              <strong id="ingestCount">0 条</strong>
+            </div>
+            <p class="filePath" id="uploadedPath"></p>
+            <div class="miniGrid" id="ingestItems"></div>
+          </section>
+        </section>
+
+        <section class="stage viewPanel hidden" id="searchView">
+          <form class="searchPanel" id="searchForm">
+            <div class="panelHead">
+              <div>
+                <span class="sectionIcon" aria-hidden="true">搜</span>
+                <h2>自然语言检索</h2>
+              </div>
+              <div class="inlineStatus idle" id="searchStatus">等待操作</div>
+            </div>
+
+            <div class="searchBox">
+              <input id="queryInput" placeholder="例如：古风女主，红衣，适合复仇短剧" />
+              <label>
+                <span>返回</span>
+                <input id="limitInput" type="number" min="1" max="50" value="10" />
+              </label>
+              <button class="primaryButton" id="searchButton" type="submit">检索</button>
+            </div>
+          </form>
+
+          <section class="emptyPanel" id="searchEmpty">
+            <span class="emptyIcon" aria-hidden="true">查</span>
+            <h2>输入一句描述开始检索</h2>
+            <p>检索结果会显示主图、分数、资产名、文本摘要和向量文本。</p>
+          </section>
+
+          <section class="resultsGrid hidden" id="resultsGrid" aria-label="检索结果"></section>
+        </section>
+      </main>
+    </div>
+
+    <script src="./src/app.js" defer></script>
+  </body>
+</html>
