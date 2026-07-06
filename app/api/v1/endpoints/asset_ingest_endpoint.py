@@ -1,7 +1,7 @@
 """资产入库 endpoint。"""
 
 from __future__ import annotations
-
+import shutil
 import re
 from pathlib import Path
 from uuid import uuid4
@@ -44,11 +44,13 @@ async def upload_and_ingest_excel_assets(
         source_project_name=project_name,
         batch_size=batch_size,
     )
+    uploaded_file_deleted = _cleanup_uploaded_excel(uploaded_path)
 
     return ExcelIngestResponse(
         count=len(items),
         items=items,
         uploaded_file_path=str(uploaded_path),
+        uploaded_file_deleted=uploaded_file_deleted,
     )
 
 
@@ -79,3 +81,19 @@ def _extract_project_name(file_name: str) -> str:
     if match:
         return match.group(1).strip()
     return stem
+
+
+def _cleanup_uploaded_excel(uploaded_path: Path) -> bool:
+    """入库成功后删除本次上传目录，避免长期保留 Excel 源文件。"""
+
+    uploads_root = (Path("runtime") / "uploads").resolve()
+    upload_dir = uploaded_path.parent.resolve()
+
+    if not upload_dir.exists():
+        return True
+
+    if upload_dir.parent != uploads_root:
+        return False
+
+    shutil.rmtree(upload_dir)
+    return True

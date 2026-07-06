@@ -13,3 +13,4 @@ class ExcelIngestResponse(BaseModel):
     count: int
     items: list[dict[str, Any]]
     uploaded_file_path: str
+    uploaded_file_deleted: bool = False
