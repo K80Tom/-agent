@@ -12,12 +12,35 @@ from sqlalchemy.orm import Session
 from app.dependencies.db import get_db
 from app.schemas.asset_ingest import (
     ExcelIngestResponse,
+    JsonAssetIngestRequest,
+    JsonAssetIngestResponse,
 )
+from app.services.json_ingest.json_asset_ingest_service import JsonAssetIngestService
 from app.services.asset_entity_ingest_service import AssetEntityIngestService
 
 
 router = APIRouter()
 
+
+@router.post("/json/assets", response_model=JsonAssetIngestResponse)
+def ingest_json_assets(
+    request: JsonAssetIngestRequest,
+    db: Session = Depends(get_db),
+) -> JsonAssetIngestResponse:
+    """接收 JSON 资产数据并写入资产库。"""
+
+    if not request.assets:
+        raise HTTPException(status_code=400, detail="assets cannot be empty")
+
+    service = JsonAssetIngestService(db)
+    items = service.ingest(request)
+
+    db.commit()
+
+    return JsonAssetIngestResponse(
+        count=len(items),
+        items=items,
+    )
 
 @router.post("/excel/upload", response_model=ExcelIngestResponse)
 async def upload_and_ingest_excel_assets(

@@ -8,6 +8,8 @@
 - 结构化数据写入 PostgreSQL
 - 资产文本生成 embedding 并写入 Milvus
 - 通过自然语言进行资产语义检索
+- 结构化 JSON 资产批量入库
+- 分镜 Excel 解析基础能力
 
 ## 当前能力
 
@@ -29,6 +31,20 @@
 -> 写入 asset_media
 -> 同步 entity / variant 到 Milvus 向量库
 ```
+
+### JSON 资产入库
+
+对接方可以绕过 Excel，直接提交结构化 JSON 资产数据。后端会写入 `asset_entities`，并同步到资产向量库。
+
+```text
+POST /api/v1/asset-ingest/json/assets
+```
+
+适合外部资产系统、标注系统或上游 Agent 已经产出结构化字段的场景。
+
+### 分镜 Excel 解析
+
+项目已加入分镜 Excel 解析模块，用于识别分镜 sheet、映射表头并标准化分镜行数据。当前分镜链路处于基础解析阶段，相关设计文档放在 `分镜docs/`。
 
 ### 向量检索
 
@@ -55,7 +71,7 @@ app/
       api.py                      # v1 路由聚合
       endpoints/
         health_endpoint.py
-        asset_ingest_endpoint.py  # Excel 上传入库接口
+        asset_ingest_endpoint.py  # Excel / JSON 入库接口
         asset_search_endpoint.py  # 语义检索接口
   core/
     config.py                     # 环境变量和全局配置
@@ -69,11 +85,13 @@ app/
     asset_entity_model.py
     asset_variant_model.py
     asset_media_model.py
+    project_director_storyboard_prompt_model.py
   repositories/                   # 数据库访问层
     asset_source_project_repository.py
     asset_entity_repository.py
     asset_variant_repository.py
     asset_media_repository.py
+    project_director_storyboard_prompt_repository.py
   schemas/                        # Pydantic 入参 / 出参
     asset_ingest.py
     asset_search.py
@@ -89,6 +107,12 @@ app/
     tos_uploader.py
     asset_media_mapping.py
     asset_variant_detector.py
+    storyboard_excel_parser.py
+    Mapping/
+      storyboard_header_mapper.py
+      storyboard_field_mapper.py
+    json_ingest/
+      json_asset_ingest_service.py
     vector/
       doubao_embedding_service.py
       milvus_vector_store.py
@@ -97,6 +121,7 @@ app/
 
 scripts/                          # 本地调试脚本
 docs/
+分镜docs/                         # 分镜入库设计文档
 runtime/                          # 上传临时文件，已忽略提交
 ```
 
@@ -129,6 +154,7 @@ POSTGRES_SCHEMA=common
 ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
 ARK_API_KEY=...
 ARK_LLM_MODEL=...
+DOUBAO_LLM_MODEL=...
 DOUBAO_EMBEDDING_MODEL=...
 
 TOS_BUCKET=...
@@ -142,6 +168,7 @@ MILVUS_URI=...
 MILVUS_USER=...
 MILVUS_PASSWORD=...
 MILVUS_COLLECTION_ASSET_ENTITY=asset_entity_vectors
+MILVUS_COLLECTION_PROJECT_STORYBOARD=project_storyboard_vectors
 ```
 
 注意：不要提交 `.env`。仓库只提交 `.env.example`。
@@ -194,6 +221,36 @@ curl.exe -X POST "http://127.0.0.1:8000/api/v1/asset-ingest/excel/upload" `
   -F "batch_size=5"
 ```
 
+### JSON 资产批量入库
+
+```text
+POST /api/v1/asset-ingest/json/assets
+```
+
+请求体示例：
+
+```json
+{
+  "source_project_name": "天尊",
+  "assets": [
+    {
+      "asset_kind": "character",
+      "name": "叶逍遥",
+      "display_name": "叶逍遥",
+      "intro": "男主，天资卓绝，性格坚韧。",
+      "appearance": "青年男性，五官清俊，气质沉稳。",
+      "style_tags": ["古装", "仙侠"],
+      "source_file_url": "https://example.com/images/ye-xiaoyao.png",
+      "metadata": {
+        "source": "external_json"
+      }
+    }
+  ]
+}
+```
+
+更完整的字段说明见 `docs/json_asset_ingest_api.md`。
+
 ### 资产语义检索
 
 ```text
@@ -244,6 +301,12 @@ D:\Anaconda3\envs\shortdrama-agent\python.exe scripts\test_asset_vector_sync.py 
 
 ```powershell
 $env:PYTHONIOENCODING="utf-8"; D:\Anaconda3\envs\shortdrama-agent\python.exe scripts\ingest_excel_sheet_assets.py "C:\Users\Firebat\Desktop\《天尊》人设和场景表.xlsx" "天尊" "人设表" --batch-size 5
+```
+
+测试分镜解析：
+
+```powershell
+D:\Anaconda3\envs\shortdrama-agent\python.exe scripts\test_storyboard_parser_smoke.py
 ```
 
 ## 数据表关系

@@ -5,3 +5,5 @@ __pycache__
 .env
 runtime
 *.log
+scripts
+分镜docs
