@@ -75,6 +75,9 @@ class Settings:
     milvus_password: str | None
     milvus_collection_asset_entity: str
 
+    # 分镜单独使用一个 Milvus collection，避免污染资产检索结果。
+    milvus_collection_project_storyboard: str
+
     @classmethod
     def from_env(cls) -> "Settings":
         """从环境变量创建配置对象。"""
@@ -108,6 +111,12 @@ class Settings:
             milvus_collection_asset_entity=os.getenv(
                 "MILVUS_COLLECTION_ASSET_ENTITY",
                 "asset_entity_vectors",
+            ),
+
+            # 分镜向量库：用于按画面描述、台词、场景等检索分镜。
+            milvus_collection_project_storyboard=os.getenv(
+                "MILVUS_COLLECTION_PROJECT_STORYBOARD",
+                "project_storyboard_vectors",
             ),
         )
 
