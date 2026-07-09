@@ -2,88 +2,195 @@
 
 from __future__ import annotations
 
+import re
+
 from app.models.asset_entity_model import AssetEntity
 from app.models.asset_variant_model import AssetVariant
 from app.services.vector.doubao_embedding_service import DoubaoEmbeddingService
 from app.services.vector.milvus_vector_store import MilvusVectorStore
 
 
+EMPTY_TEXT_VALUES = {
+    "",
+    "-",
+    "--",
+    "/",
+    "无",
+    "暂无",
+    "暂无信息",
+    "未填",
+    "未填写",
+    "未提供",
+    "未提及",
+    "未知",
+    "不详",
+    "空",
+    "none",
+    "null",
+    "n/a",
+}
+
+
+def _is_emptyish(value) -> bool:
+    """判断一个字段值是否没有可检索语义。"""
+
+    if value is None:
+        return True
+
+    text = str(value).strip()
+    text = text.strip(" \t\r\n。；;，,、")
+    return text.lower() in EMPTY_TEXT_VALUES
+
+
+def _clean_vector_text(value) -> str | None:
+    """清理向量文本，去掉“字段：无”这类无效片段。"""
+
+    if _is_emptyish(value):
+        return None
+
+    text = str(value).strip()
+    segments = re.split(r"[；;\n]+", text)
+    kept: list[str] = []
+
+    for segment in segments:
+        segment = segment.strip()
+        if _is_emptyish(segment):
+            continue
+
+        if "：" in segment:
+            _label, content = segment.split("：", 1)
+            if _is_emptyish(content):
+                continue
+        elif ":" in segment:
+            _label, content = segment.split(":", 1)
+            if _is_emptyish(content):
+                continue
+
+        kept.append(segment)
+
+    return "；".join(kept) if kept else None
+
+
+def _clean_tag(value) -> str | None:
+    """清理 style_tags 里的空标签。"""
+
+    if _is_emptyish(value):
+        return None
+    return str(value).strip()
+
+
+def _strip_leading_label(text: str, labels: list[str]) -> str:
+    """去掉字段文本里已有的前缀标签，避免“外观：外观：...”."""
+
+    cleaned = text.strip()
+    for label in labels:
+        for delimiter in ("：", ":"):
+            prefix = f"{label}{delimiter}"
+            if cleaned.startswith(prefix):
+                return cleaned[len(prefix) :].strip()
+    return cleaned
+
+
 def build_entity_vector_text(entity: AssetEntity) -> str:
-    """把 asset_entities 资产主体转换成向量化文本。"""
+    """把 asset_entities 资产主体转成向量化文本（路线A：单向量，按判别力排序）。
 
-    parts: list[str] = []
+    排版原则：
+    1. 高熵内容放前面：名称 → 简介 → 外观/发型/服装 → 风格。
+       它们每条资产都不同，是区分资产的主力信号。
+    2. 低熵字段（来源项目/资产类型/分类）不写入向量文本；
+    这些字段 metadata / 数据库里已有，交给结构化召回或过滤。
+    3. 裸标量（年龄/身高）必须带最小标签，否则 "28"、"175" 没有语义。
+    """
 
-    def add(label: str, value) -> None:
-        if value is None:
-            return
+    lines: list[str] = []
 
-        if isinstance(value, str) and not value.strip():
-            return
+    # —— 名称：最高判别信号，放最前，尽量裸值 ——
+    name = _clean_vector_text(entity.name) or ""
+    display_name = _clean_vector_text(entity.display_name) or ""
+    if name and display_name and display_name != name:
+        lines.append(f"{name}（{display_name}）")
+    elif name or display_name:
+        lines.append(name or display_name)
 
-        if isinstance(value, list) and not value:
-            return
+    # —— 语义/视觉自由文本：内容自带含义，只用轻标签点明字段角色 ——
+    intro = _clean_vector_text(entity.intro)
+    if intro:
+        lines.append(intro)
+    appearance = _clean_vector_text(entity.appearance)
+    if appearance:
+        appearance = _strip_leading_label(appearance, ["外观", "外观描述", "视觉", "画面"])
+        if appearance:
+            lines.append(f"外观：{appearance}")
+    hair_description = _clean_vector_text(entity.hair_description)
+    if hair_description:
+        hair_description = _strip_leading_label(
+            hair_description,
+            ["发型长相", "发型", "头发", "头部特征"],
+        )
+        if hair_description:
+            lines.append(f"发型长相：{hair_description}")
+    outfit_description = _clean_vector_text(entity.outfit_description)
+    if outfit_description:
+        outfit_description = _strip_leading_label(
+            outfit_description,
+            ["服装", "服装描述", "穿着", "配饰"],
+        )
+        if outfit_description:
+            lines.append(f"服装：{outfit_description}")
+    if entity.style_tags:
+        tags = "、".join(
+            tag for tag in (_clean_tag(item) for item in entity.style_tags) if tag
+        )
+        if tags:
+            lines.append(f"风格：{tags}")
 
-        parts.append(f"{label}：{value}")
+    # —— 裸标量：必须带标签，压成一行，放在语义内容之后 ——
+    attrs: list[str] = []
+    if not _is_emptyish(entity.gender):
+        attrs.append(f"性别{entity.gender}")
+    if entity.age_value is not None:
+        attrs.append(f"年龄{entity.age_value}岁")
+    if entity.height_cm is not None:
+        attrs.append(f"身高{entity.height_cm}cm")
+    if attrs:
+        lines.append(" ".join(attrs))
 
-    add("来源项目", entity.source_project_name)
-    add("资产类型", entity.asset_kind)
-    add("资产名称", entity.name)
-    add("展示名称", entity.display_name)
-    add("简介", entity.intro)
-    add("外观描述", entity.appearance)
-    add("年龄", entity.age_value)
-    add("性别", entity.gender)
-    add("身高厘米", entity.height_cm)
-    add("发型或长相描述", entity.hair_description)
-    add("服装描述", entity.outfit_description)
-    add("资产分类", entity.category)
-    add("风格标签", entity.style_tags)
-
-    return "\n".join(parts)
+    return "\n".join(lines)
 
 
-def build_variant_vector_text(
-    *,
-    variant: AssetVariant,
-    parent_entity: AssetEntity,
-) -> str:
-    """把 asset_variants 变体和父资产一起转换成向量化文本。"""
+def build_variant_vector_text(*, variant: AssetVariant, parent_entity: AssetEntity) -> str:
+    """把 asset_variants 变体+父资产转成向量化文本（路线A：按判别力排序）。
 
-    parts: list[str] = []
+    变体自身的名称/描述/视觉提示词放最前，父资产只留必要身份锚点，
+    避免父资产"整段人生"稀释变体自己的信号。
+    """
 
-    def add(label: str, value) -> None:
-        if value is None:
-            return
+    lines: list[str] = []
 
-        if isinstance(value, str) and not value.strip():
-            return
+    # —— 变体自身：最高判别信号 ——
+    variant_name = _clean_vector_text(variant.name)
+    if variant_name:
+        lines.append(variant_name)
+    description = _clean_vector_text(variant.description)
+    if description:
+        lines.append(description)
+    visual_prompt = _clean_vector_text(variant.visual_prompt)
+    if visual_prompt:
+        lines.append(f"视觉：{visual_prompt}")
+    usage_context = _clean_vector_text(variant.usage_context)
+    if usage_context:
+        lines.append(f"使用场景：{usage_context}")
 
-        if isinstance(value, list) and not value:
-            return
+    # —— 父资产身份锚点：让变体挂到正确主体，但不喧宾夺主 ——
+    parent_name = _clean_vector_text(parent_entity.name)
+    if parent_name:
+        lines.append(f"这是{parent_name}的变体造型。")
+    parent_intro = _clean_vector_text(parent_entity.intro)
+    if parent_intro:
+        lines.append(parent_intro)
 
-        parts.append(f"{label}：{value}")
+    return "\n".join(lines)
 
-    add("来源项目", parent_entity.source_project_name)
-    add("资产类型", parent_entity.asset_kind)
-    add("主体名称", parent_entity.name)
-    add("主体展示名称", parent_entity.display_name)
-    add("主体简介", parent_entity.intro)
-    add("主体外观描述", parent_entity.appearance)
-    add("主体年龄", parent_entity.age_value)
-    add("主体性别", parent_entity.gender)
-    add("主体身高厘米", parent_entity.height_cm)
-    add("主体发型或长相描述", parent_entity.hair_description)
-    add("主体服装描述", parent_entity.outfit_description)
-    add("主体分类", parent_entity.category)
-    add("主体风格标签", parent_entity.style_tags)
-    add("变体类型", variant.variant_kind)
-    add("变体名称", variant.name)
-    add("变体描述", variant.description)
-    add("变体使用场景", variant.usage_context)
-    add("变体视觉提示词", variant.visual_prompt)
-    add("变体来源文本", variant.source_text)
-
-    return "\n".join(parts)
 
 
 class AssetVectorSyncService:
@@ -97,6 +204,10 @@ class AssetVectorSyncService:
         """同步 asset_entities 资产主体到向量数据库。"""
 
         text = build_entity_vector_text(entity)
+        if not text.strip():
+            print(f"skip empty entity vector text: {entity.id}")
+            return
+
         vector = self.embedding_service.embed_text(text)
         metadata = {
             "source_table": "asset_entities",
@@ -124,6 +235,10 @@ class AssetVectorSyncService:
             variant=variant,
             parent_entity=parent_entity,
         )
+        if not text.strip():
+            print(f"skip empty variant vector text: {variant.id}")
+            return
+
         vector = self.embedding_service.embed_text(text)
         metadata = {
             "source_table": "asset_variants",

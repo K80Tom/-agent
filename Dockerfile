@@ -1,15 +1,19 @@
 FROM python:3.12-slim
 
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
 WORKDIR /app
 
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-
-RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip config set global.index-url "${PIP_INDEX_URL}"
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir -r requirements.txt
 
+# Runtime image only includes the FastAPI service and static frontend.
+# scripts/ and storyboard docs stay out of the build context via .dockerignore.
 COPY app ./app
 COPY docs ./docs
 COPY frontend ./frontend

@@ -1,3 +1,5 @@
+# Runtime dependencies for the FastAPI service image.
+# Script-only tooling is intentionally not included in this image.
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 pydantic>=2.0.0
