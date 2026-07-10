@@ -41,7 +41,7 @@
       <main class="workspace">
         <header class="topbar">
           <div>
-            <span class="pageKicker" id="pageKicker">Excel Asset Ingest</span>
+            <span class="pageKicker" id="pageKicker">Asset Ingest</span>
             <h1 id="pageTitle">智能入库</h1>
           </div>
           <div class="topActions">
@@ -57,16 +57,16 @@
             <div class="panelHead">
               <div>
                 <span class="sectionIcon" aria-hidden="true">入</span>
-                <h2>上传 Excel 并自动入库</h2>
+                <h2>上传资产文件并自动入库</h2>
               </div>
               <div class="inlineStatus idle" id="ingestStatus">等待操作</div>
             </div>
 
             <label class="dropZone" id="dropZone">
-              <input id="excelInput" type="file" accept=".xlsx,.xlsm" />
-              <span class="fileGlyph" aria-hidden="true">XLS</span>
-              <strong id="fileTitle">选择或拖入短剧资产表</strong>
-              <span id="fileHint">支持 .xlsx / .xlsm</span>
+              <input id="excelInput" type="file" accept=".xlsx,.xlsm,.jpg,.jpeg,.png,.webp,.bmp,image/*" />
+              <span class="fileGlyph" id="fileGlyph" aria-hidden="true">FILE</span>
+              <strong id="fileTitle">选择或拖入资产表 / 图片</strong>
+              <span id="fileHint">支持 .xlsx / .xlsm / .jpg / .png / .webp / .bmp</span>
             </label>
 
             <div class="formGrid">
@@ -85,8 +85,8 @@
 
           <section class="emptyPanel" id="ingestEmpty">
             <span class="emptyIcon" aria-hidden="true">AI</span>
-            <h2>等待第一份资产表</h2>
-            <p>上传后会展示入库数量、保存路径和前几条资产预览。</p>
+            <h2>等待第一份资产文件</h2>
+            <p>Excel 会批量解析入库；图片会用豆包视觉模型识别字段、上传 TOS 后入库。</p>
           </section>
 
           <section class="resultPanel hidden" id="ingestResultPanel">

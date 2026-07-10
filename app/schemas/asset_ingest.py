@@ -18,6 +18,16 @@ class ExcelIngestResponse(BaseModel):
     uploaded_file_deleted: bool = False
 
 
+class AssetUploadResponse(BaseModel):
+    """统一文件上传入库响应。"""
+
+    mode: str
+    count: int
+    items: list[dict[str, Any]]
+    uploaded_file_path: str | None = None
+    uploaded_file_deleted: bool = False
+
+
 class JsonAssetItem(BaseModel):
     """JSON 资产入库的单条资产。
 

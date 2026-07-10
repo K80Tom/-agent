@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any
 
 import httpx
@@ -19,11 +20,11 @@ class LLMExcelAssetExtractor:
     def __init__(self) -> None:
         if not settings.ark_api_key:
             raise ValueError("Missing ARK_API_KEY in .env")
-        if not settings.llm_model:
-            raise ValueError("Missing ARK_LLM_MODEL or DOUBAO_LLM_MODEL in .env")
+        if not settings.excel_llm_model:
+            raise ValueError("Missing DOUBAO_LLM_MODEL in .env")
 
         self.api_key = settings.ark_api_key
-        self.model = settings.llm_model
+        self.model = settings.excel_llm_model
         self.endpoint = f"{settings.ark_base_url.rstrip('/')}/chat/completions"
 
     def extract(
@@ -35,15 +36,35 @@ class LLMExcelAssetExtractor:
     ) -> dict[str, Any]:
         """抽取单行资产字段。"""
 
+        total_started = time.perf_counter()
+        timing_ms: dict[str, int] = {}
+
+        stage_started = time.perf_counter()
         prompt = self._build_single_prompt(row)
-        raw_result = self._call_llm(prompt)
-        asset = self._parse_json_object_with_repair(raw_result)
-        return self._normalize_asset(
+        timing_ms["prompt_build"] = self._elapsed_ms(stage_started)
+
+        raw_result = self._call_llm(prompt, timing_ms=timing_ms)
+
+        stage_started = time.perf_counter()
+        asset = self._parse_json_object_with_repair(raw_result, timing_ms=timing_ms)
+        timing_ms["parse_object_total"] = self._elapsed_ms(stage_started)
+
+        stage_started = time.perf_counter()
+        result = self._normalize_asset(
             asset,
             row=row,
             source_project_id=source_project_id,
             source_project_name=source_project_name,
         )
+        timing_ms["normalize"] = self._elapsed_ms(stage_started)
+        timing_ms["total"] = self._elapsed_ms(total_started)
+        print(
+            "[excel-llm-timing] "
+            f"mode=single row={self._row_key(row)} model={self.model} "
+            f"prompt_chars={len(prompt)} response_chars={len(raw_result)} "
+            f"timing_ms={timing_ms}"
+        )
+        return result
 
     def extract_many(
         self,
@@ -57,16 +78,31 @@ class LLMExcelAssetExtractor:
         if not rows:
             return []
 
-        prompt = self._build_batch_prompt(rows)
-        raw_result = self._call_llm(prompt)
-        assets = self._parse_json_array_with_repair(raw_result)
-        assets_by_key = self._index_assets_by_row_key(assets)
+        total_started = time.perf_counter()
+        timing_ms: dict[str, int] = {}
 
+        stage_started = time.perf_counter()
+        prompt = self._build_batch_prompt(rows)
+        timing_ms["prompt_build"] = self._elapsed_ms(stage_started)
+
+        raw_result = self._call_llm(prompt, timing_ms=timing_ms)
+
+        stage_started = time.perf_counter()
+        assets = self._parse_json_array_with_repair(raw_result, timing_ms=timing_ms)
+        timing_ms["parse_array_total"] = self._elapsed_ms(stage_started)
+
+        stage_started = time.perf_counter()
+        assets_by_key = self._index_assets_by_row_key(assets)
+        timing_ms["index_assets"] = self._elapsed_ms(stage_started)
+
+        stage_started = time.perf_counter()
+        fallback_count = 0
         normalized_assets: list[dict[str, Any]] = []
         for row in rows:
             row_key = self._row_key(row)
             asset = assets_by_key.get(row_key)
             if asset is None:
+                fallback_count += 1
                 normalized_assets.append(
                     self.extract(
                         row,
@@ -85,6 +121,18 @@ class LLMExcelAssetExtractor:
                 )
             )
 
+        timing_ms["normalize"] = self._elapsed_ms(stage_started)
+        timing_ms["total"] = self._elapsed_ms(total_started)
+        row_keys = [self._row_key(row) for row in rows]
+        rows_preview = ",".join(row_keys[:5])
+        if len(row_keys) > 5:
+            rows_preview += ",..."
+        print(
+            "[excel-llm-timing] "
+            f"mode=batch row_count={len(rows)} rows={rows_preview} model={self.model} "
+            f"prompt_chars={len(prompt)} response_chars={len(raw_result)} "
+            f"fallback_count={fallback_count} timing_ms={timing_ms}"
+        )
         return normalized_assets
 
     def _build_single_prompt(self, row: ExcelAssetRow) -> str:
@@ -119,7 +167,14 @@ class LLMExcelAssetExtractor:
             rows_text=f"Excel 行数据：\n{rows_text}",
         )
 
-    def _call_llm(self, prompt: str) -> str:
+    def _call_llm(
+        self,
+        prompt: str,
+        *,
+        timing_ms: dict[str, int] | None = None,
+        timing_prefix: str = "llm",
+    ) -> str:
+        stage_started = time.perf_counter()
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -138,9 +193,14 @@ class LLMExcelAssetExtractor:
                 },
             ],
         }
+        if timing_ms is not None:
+            timing_ms[f"{timing_prefix}_payload_build"] = self._elapsed_ms(stage_started)
 
+        stage_started = time.perf_counter()
         with httpx.Client(timeout=120.0) as client:
             response = client.post(self.endpoint, headers=headers, json=payload)
+        if timing_ms is not None:
+            timing_ms[f"{timing_prefix}_http"] = self._elapsed_ms(stage_started)
 
         if response.status_code >= 400:
             raise RuntimeError(
@@ -148,24 +208,72 @@ class LLMExcelAssetExtractor:
                 f"status={response.status_code}, body={response.text}"
             )
 
+        stage_started = time.perf_counter()
         data = response.json()
-        return data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"]["content"]
+        if timing_ms is not None:
+            timing_ms[f"{timing_prefix}_response_parse"] = self._elapsed_ms(stage_started)
+        return content
 
-    def _parse_json_object_with_repair(self, text: str) -> dict[str, Any]:
+    def _parse_json_object_with_repair(
+        self,
+        text: str,
+        *,
+        timing_ms: dict[str, int] | None = None,
+    ) -> dict[str, Any]:
+        stage_started = time.perf_counter()
         try:
-            return self._parse_json_object(text)
+            result = self._parse_json_object(text)
+            if timing_ms is not None:
+                timing_ms["json_parse"] = self._elapsed_ms(stage_started)
+            return result
         except (ValueError, json.JSONDecodeError):
-            repaired_text = self._repair_json(text, expected_shape="JSON object")
-            return self._parse_json_object(repaired_text)
+            if timing_ms is not None:
+                timing_ms["json_parse_failed"] = self._elapsed_ms(stage_started)
+            repaired_text = self._repair_json(
+                text,
+                expected_shape="JSON object",
+                timing_ms=timing_ms,
+            )
+            stage_started = time.perf_counter()
+            result = self._parse_json_object(repaired_text)
+            if timing_ms is not None:
+                timing_ms["json_parse_after_repair"] = self._elapsed_ms(stage_started)
+            return result
 
-    def _parse_json_array_with_repair(self, text: str) -> list[dict[str, Any]]:
+    def _parse_json_array_with_repair(
+        self,
+        text: str,
+        *,
+        timing_ms: dict[str, int] | None = None,
+    ) -> list[dict[str, Any]]:
+        stage_started = time.perf_counter()
         try:
-            return self._parse_json_array(text)
+            result = self._parse_json_array(text)
+            if timing_ms is not None:
+                timing_ms["json_parse"] = self._elapsed_ms(stage_started)
+            return result
         except (ValueError, json.JSONDecodeError):
-            repaired_text = self._repair_json(text, expected_shape="JSON array")
-            return self._parse_json_array(repaired_text)
+            if timing_ms is not None:
+                timing_ms["json_parse_failed"] = self._elapsed_ms(stage_started)
+            repaired_text = self._repair_json(
+                text,
+                expected_shape="JSON array",
+                timing_ms=timing_ms,
+            )
+            stage_started = time.perf_counter()
+            result = self._parse_json_array(repaired_text)
+            if timing_ms is not None:
+                timing_ms["json_parse_after_repair"] = self._elapsed_ms(stage_started)
+            return result
 
-    def _repair_json(self, text: str, *, expected_shape: str) -> str:
+    def _repair_json(
+        self,
+        text: str,
+        *,
+        expected_shape: str,
+        timing_ms: dict[str, int] | None = None,
+    ) -> str:
         """让模型修复一次非法 JSON 输出。"""
 
         prompt = f"""
@@ -180,7 +288,11 @@ class LLMExcelAssetExtractor:
 待修复内容：
 {text}
 """.strip()
-        return self._call_llm(prompt)
+        return self._call_llm(
+            prompt,
+            timing_ms=timing_ms,
+            timing_prefix="repair_llm",
+        )
 
     def _parse_json_object(self, text: str) -> dict[str, Any]:
         data = self._parse_json_value(text)
@@ -410,3 +522,7 @@ class LLMExcelAssetExtractor:
             "voice": "音色",
         }
         return mapping.get(asset_kind, "其他")
+
+    @staticmethod
+    def _elapsed_ms(started_at: float) -> int:
+        return round((time.perf_counter() - started_at) * 1000)

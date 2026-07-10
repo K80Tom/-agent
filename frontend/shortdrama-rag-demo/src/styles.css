@@ -24,7 +24,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -378,7 +379,7 @@ button {
 
 .formGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 160px;
+  grid-template-columns: minmax(0, 1fr) 160px 180px;
   gap: 14px;
   margin-top: 18px;
 }
@@ -393,6 +394,7 @@ button {
 }
 
 .formGrid input,
+.formGrid select,
 .searchBox input {
   height: 46px;
   border: 1px solid #dce1ea;
@@ -404,6 +406,7 @@ button {
 }
 
 .formGrid input:focus,
+.formGrid select:focus,
 .searchBox input:focus {
   border-color: #315cff;
   box-shadow: 0 0 0 4px rgba(49, 92, 255, 0.12);
@@ -527,6 +530,23 @@ button {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-height: 1.55;
+}
+
+.timingBadges {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.timingBadges span {
+  padding: 3px 7px;
+  border: 1px solid #dfe5f2;
+  border-radius: 6px;
+  background: #f7f9fc;
+  color: #4f5b72;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .miniImageWrap,
