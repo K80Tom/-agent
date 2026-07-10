@@ -5,6 +5,8 @@
 - Excel 资产表上传与解析
 - 使用大模型从 Excel 行中提取结构化资产字段
 - Excel 内嵌图片提取并上传到火山 TOS
+- 统一上传入口支持 Excel 批量入库和单张图片视觉识别入库
+- 入库响应会在 `metadata.ingest_timing_ms` 返回耗时明细，前端会展示总耗时、模型、TOS、数据库等耗时徽标
 - 结构化数据写入 PostgreSQL
 - 资产文本生成 embedding 并写入 Milvus
 - 通过自然语言进行资产语义检索，支持 LLM 查询理解、多 query 召回、结构化 SQL 辅助召回和融合排序
@@ -18,6 +20,10 @@
 ### Excel 入库
 
 接口接收 Excel 文件，后端自动解析工作表，不需要前端手动传 `sheet_name`。
+
+Excel 字段抽取模型固定读取 `.env` 里的 `DOUBAO_LLM_MODEL`；`DOUBAO_LLM_MODEL_2_0_LITE` 不再作为 Excel 字段抽取的优先模型。
+
+入库完成后，每条返回 item 的 `metadata.ingest_timing_ms` 会包含 API 层耗时，例如 `api_save_upload`、`api_service_ingest_excel`、`api_cleanup_upload`、`api_total_before_response`，前端会用这些字段显示耗时徽标。
 
 流程：
 
@@ -44,11 +50,11 @@ POST /api/v1/asset-ingest/json/assets
 
 适合外部资产系统、标注系统或上游 Agent 已经产出结构化字段的场景。
 
-### 图片文件夹视觉入库
+### 图片视觉入库
 
-当资产来源只有图片目录、没有 Excel/JSON 字段时，可以用本地脚本按文件夹抽样图片，调用豆包视觉模型识别 `asset_entities` 字段，上传图片到 TOS，写入 `asset_entities` / `asset_media`，并同步 Milvus 向量。
+当资产来源只有图片、没有 Excel/JSON 字段时，可以通过统一上传接口提交单张图片。后端会调用豆包视觉模型识别 `asset_entities` 字段，上传图片到 TOS，写入 `asset_entities` / `asset_media`，并把向量同步放到后台任务，避免上传接口长时间等待。
 
-该能力放在 `scripts/ingest_image_folder_assets.py`，属于本地批处理工具，不进入 Docker 服务镜像。
+如果要按文件夹批量抽样图片，继续使用 `scripts/ingest_image_folder_assets.py`。这个脚本属于本地批处理工具，不进入 Docker 服务镜像。
 
 ### 分镜 Excel 解析
 
@@ -203,9 +209,10 @@ MILVUS_COLLECTION_PROJECT_STORYBOARD=project_storyboard_vectors
 说明：
 
 - `DATABASE_URL` 设置后优先使用；为空时使用 `POSTGRES_*` 拼接 PostgreSQL 连接。
-- `ARK_LLM_MODEL` / `DOUBAO_LLM_MODEL` 用于 Excel 字段抽取和检索 Query Understanding。
+- `DOUBAO_LLM_MODEL` 用于 Excel 资产字段抽取；如果没有配置会直接报错，不再回退到 `DOUBAO_LLM_MODEL_2_0_LITE`。
+- `ARK_LLM_MODEL` / `DOUBAO_LLM_MODEL` 用于检索 Query Understanding。
 - `DOUBAO_EMBEDDING_MODEL` 用于资产文本、query 和评测脚本的 embedding。
-- `DOUBAO_VISION_MODEL` / `DOUBAO_LLM_MODEL_2_0_LITE` 主要给本地图片视觉入库和图像语义评测脚本使用。
+- `doubao_seedence_mini` / `DOUBAO_LLM_MODEL_2_0_LITE` / `DOUBAO_VISION_MODEL` / `DOUBAO_LLM_MODEL` 用于图片视觉入库，按这个顺序选择可用模型。
 - `TOS_ENDPOINT` 是兼容变量；业务代码优先读取 `TOS_SDK_ENDPOINT` 和 `TOS_PUBLIC_BASE_URL`。
 - 不要提交 `.env`。仓库只提交 `.env.example`。
 
@@ -255,11 +262,45 @@ Docker 镜像只包含 FastAPI 服务运行需要的内容：`app/`、`docs/`、
 GET /api/v1/health
 ```
 
+### 统一上传并自动入库
+
+前端默认调用这个统一入口。后端会根据文件后缀自动选择 Excel 批量入库或图片视觉入库。
+
+```text
+POST /api/v1/asset-ingest/upload
+```
+
+表单参数：
+
+- `file`：Excel 文件或图片文件；Excel 支持 `.xlsx` / `.xlsm`，图片支持 `.jpg` / `.jpeg` / `.png` / `.webp` / `.bmp`
+- `source_project_name`：可选，不传则 Excel 从文件名提取，图片使用文件名作为兜底项目名
+- `batch_size`：Excel 每批调用大模型的行数，默认 `5`；图片上传时会忽略该参数
+- `asset_kind_hint`：可选，仅图片上传使用，用于提示视觉模型资产类型
+
+响应里的 `mode` 会返回 `excel` 或 `image`。返回 item 的 `metadata.ingest_timing_ms` 会包含耗时明细，前端会展示为耗时徽标。
+
+示例：
+
+```powershell
+curl.exe -X POST "http://127.0.0.1:8000/api/v1/asset-ingest/upload" `
+  -F "file=@C:\Users\Firebat\Desktop\《天尊》人设和场景表.xlsx" `
+  -F "batch_size=5"
+```
+
+```powershell
+curl.exe -X POST "http://127.0.0.1:8000/api/v1/asset-ingest/upload" `
+  -F "file=@C:\Users\Firebat\Desktop\asset.png" `
+  -F "source_project_name=图片资产库" `
+  -F "asset_kind_hint=character"
+```
+
 ### 上传 Excel 并自动入库
 
 ```text
 POST /api/v1/asset-ingest/excel/upload
 ```
+
+这是 Excel 专用兼容接口；新前端使用上面的统一上传入口。
 
 表单参数：
 

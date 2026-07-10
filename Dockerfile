@@ -12,7 +12,8 @@ RUN pip config set global.index-url "${PIP_INDEX_URL}"
 COPY requirements.txt .
 RUN python -m pip install --no-cache-dir -r requirements.txt
 
-# Runtime image only includes the FastAPI service and static frontend.
+# Runtime image includes the FastAPI service, static frontend, and runtime
+# dependencies for Excel ingest plus single-image visual ingest.
 # scripts/ and storyboard docs stay out of the build context via .dockerignore.
 COPY app ./app
 COPY docs ./docs

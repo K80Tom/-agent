@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 import hashlib
+import time
 from app.models.asset_entity_model import AssetEntity
 from app.repositories.asset_entity_repository import AssetEntityRepository
 from app.repositories.asset_variant_repository import AssetVariantRepository
@@ -103,11 +104,13 @@ class AssetEntityIngestService:
     ) -> list[dict[str, Any]]:
         """批量入库已经解析好的 Excel 资产行。"""
 
+        ingest_started = time.perf_counter()
         media_source_project_name = source_project_name
         source_file = Path(excel_path)
         source_file_name = source_file.name
         source_project_code = "file_" + hashlib.md5(str(source_file).encode("utf-8")).hexdigest()[:12]
 
+        stage_started = time.perf_counter()
         source_project = self.source_project_repository.get_or_create(
             name=source_project_name,
             code=source_project_code,
@@ -116,19 +119,31 @@ class AssetEntityIngestService:
                 "source_file_path": str(source_file),
             },
         )
+        source_project_ms = self._elapsed_ms(stage_started)
         source_project_id = str(source_project.id)
         actual_project_name = source_project.name or source_project_name
 
         results: list[dict[str, Any]] = []
 
-        for batch_rows in self._iter_batches(rows, batch_size=batch_size):
+        print(
+            "[excel-ingest-timing] "
+            f"scope=start file={source_file_name} row_count={len(rows)} batch_size={batch_size} "
+            f"source_project_get_or_create={source_project_ms}"
+        )
+
+        for batch_index, batch_rows in enumerate(self._iter_batches(rows, batch_size=batch_size), start=1):
+            batch_started = time.perf_counter()
+            batch_timing_ms: dict[str, int] = {}
             try:
+                stage_started = time.perf_counter()
                 assets = self.llm_extractor.extract_many(
                     batch_rows,
                     source_project_id=source_project_id,
                     source_project_name=actual_project_name,
                 )
+                batch_timing_ms["llm_extract"] = self._elapsed_ms(stage_started)
 
+                stage_started = time.perf_counter()
                 batch_items = [
                     (
                         row,
@@ -140,7 +155,10 @@ class AssetEntityIngestService:
                     )
                     for row, asset_data in zip(batch_rows, assets)
                 ]
+                batch_timing_ms["variant_detect"] = self._elapsed_ms(stage_started)
 
+                entity_count = 0
+                stage_started = time.perf_counter()
                 for row, asset_data, variant_info in batch_items:
                     if variant_info is not None:
                         continue
@@ -152,7 +170,11 @@ class AssetEntityIngestService:
                         media_source_project_name=media_source_project_name,
                     )
                     results.append(self._serialize_entity(entity))
+                    entity_count += 1
+                batch_timing_ms["save_entities_media_vector"] = self._elapsed_ms(stage_started)
 
+                variant_count = 0
+                stage_started = time.perf_counter()
                 for row, asset_data, variant_info in batch_items:
                     if variant_info is None:
                         continue
@@ -166,12 +188,31 @@ class AssetEntityIngestService:
                         media_source_project_name=media_source_project_name,
                     )
                     results.append(result)
+                    variant_count += 1
+                batch_timing_ms["save_variants_media_vector"] = self._elapsed_ms(stage_started)
 
+                stage_started = time.perf_counter()
                 self.db.commit()
+                batch_timing_ms["db_commit"] = self._elapsed_ms(stage_started)
+                batch_timing_ms["batch_total"] = self._elapsed_ms(batch_started)
+                row_keys = ",".join(f"{row.sheet_name}:{row.row_number}" for row in batch_rows[:5])
+                if len(batch_rows) > 5:
+                    row_keys += ",..."
+                print(
+                    "[excel-ingest-batch-timing] "
+                    f"file={source_file_name} batch={batch_index} rows={row_keys} "
+                    f"row_count={len(batch_rows)} entity_count={entity_count} variant_count={variant_count} "
+                    f"timing_ms={batch_timing_ms}"
+                )
             except Exception:
                 self.db.rollback()
                 raise
 
+        print(
+            "[excel-ingest-timing] "
+            f"scope=total file={source_file_name} row_count={len(rows)} "
+            f"result_count={len(results)} total_ms={self._elapsed_ms(ingest_started)}"
+        )
         return results
 
     def _save_entity_with_media(
@@ -403,6 +444,10 @@ class AssetEntityIngestService:
         if batch_size <= 0:
             raise ValueError("batch_size must be greater than 0")
         return [rows[index : index + batch_size] for index in range(0, len(rows), batch_size)]
+
+    @staticmethod
+    def _elapsed_ms(started_at: float) -> int:
+        return round((time.perf_counter() - started_at) * 1000)
 
     @staticmethod
     def _media_asset_name(asset_data: dict[str, Any], row: ExcelAssetRow) -> str:

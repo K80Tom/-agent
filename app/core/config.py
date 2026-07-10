@@ -63,6 +63,9 @@ class Settings:
     ark_llm_model: str | None
     doubao_llm_model: str | None
     doubao_embedding_model: str | None
+    doubao_seedence_mini: str | None
+    doubao_vision_model: str | None
+    doubao_llm_model_2_0_lite: str | None
 
     tos_bucket: str | None
     tos_sdk_endpoint: str | None
@@ -99,6 +102,12 @@ class Settings:
             ark_llm_model=os.getenv("ARK_LLM_MODEL"),
             doubao_llm_model=os.getenv("DOUBAO_LLM_MODEL"),
             doubao_embedding_model=os.getenv("DOUBAO_EMBEDDING_MODEL"),
+            doubao_seedence_mini=os.getenv("doubao_seedence_mini"),
+            doubao_vision_model=os.getenv("DOUBAO_VISION_MODEL"),
+            doubao_llm_model_2_0_lite=(
+                os.getenv("DOUBAO_LLM_MODEL_2_0_LITE")
+                or os.getenv("DOUBAO_LLM_MODE_2.0lite")
+            ),
             tos_bucket=os.getenv("TOS_BUCKET"),
             tos_sdk_endpoint=os.getenv("TOS_SDK_ENDPOINT") or os.getenv("TOS_ENDPOINT"),
             tos_public_base_url=os.getenv("TOS_PUBLIC_BASE_URL") or os.getenv("TOS_ENDPOINT"),
@@ -151,6 +160,24 @@ class Settings:
         """返回用于字段抽取的大模型接入点。"""
 
         return self.ark_llm_model or self.doubao_llm_model
+
+    @property
+    def excel_llm_model(self) -> str | None:
+        """返回用于 Excel 资产字段抽取的大模型接入点。"""
+
+        return self.doubao_llm_model
+
+    @property
+    def vision_model(self) -> str | None:
+        """返回用于图片理解的大模型接入点。"""
+
+        return (
+            self.doubao_seedence_mini
+            or self.doubao_llm_model_2_0_lite
+            or self.doubao_vision_model
+            or self.doubao_llm_model
+            or self.ark_llm_model
+        )
 
 
 settings = Settings.from_env()
